@@ -1,0 +1,63 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "default.moc3",
+		"Textures": [
+			"default4096/texture_00.png"
+		],
+		"Physics": "default4096/default.json",
+		"DisplayInfo": "default4096/default.cdi3.json",
+		"Motions": {
+			"Tap": [
+				{
+					"File": "default4096/motions/miku_01.motion3.json"
+				},
+				{
+					"File": "default4096/motions/miku_02.motion3.json"
+				},
+				{
+					"File": "default4096/motions/miku_06.motion3.json"
+				}
+			],
+			"Flick": [
+				{
+					"File": "default4096/motions/miku_03.motion3.json"
+				},
+				{
+					"File": "default4096/motions/miku_04.motion3.json"
+				},
+				{
+					"File": "default4096/motions/miku_07.motion3.json"
+				}
+			],
+			"Flick3": [
+				{
+					"File": "default4096/motions/miku_05.motion3.json"
+				}
+			],
+			"Idle": [
+				{
+					"File": "default4096/motions/miku_idle.motion3.json"
+				}
+			]
+		}
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": [
+				"PARAM_MOUTH_OPEN_Y"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"PARAM_EYE_L_OPEN",
+				"PARAM_EYE_R_OPEN"
+			]
+		}
+	],
+	"HitAreas": []
+}
