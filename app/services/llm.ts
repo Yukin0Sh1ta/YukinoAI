@@ -92,15 +92,17 @@ function buildRequestBody(params: StreamChatParams, stream: boolean): Record<str
     ...messages.map(formatMessage),
   ]
 
+  const toolsFormatted = formatTools(tools)
+
   const body: Record<string, unknown> = {
     model: providerConfig.model,
     messages: formattedMessages,
     temperature: 0.7,
-    max_tokens: 100,  // 限制回复长度，适合日常对话
+    // 带工具时留出足够长度，避免工具参数的 JSON 被截断
+    max_tokens: toolsFormatted ? 1024 : 100,
     stream,
   }
 
-  const toolsFormatted = formatTools(tools)
   if (toolsFormatted) {
     body.tools = toolsFormatted
   }

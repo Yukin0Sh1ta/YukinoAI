@@ -3,6 +3,7 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { useSettingsStore } from '~/stores/settings'
 import { useCharacterStore } from '~/stores/character'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { emitTo } from '@tauri-apps/api/event'
 
 const settingsStore = useSettingsStore()
 const characterStore = useCharacterStore()
@@ -66,6 +67,14 @@ async function save() {
     settingsStore.character = updatedChar
 
     await settingsStore.saveSettings()
+
+    // 通知主窗口重新加载设置（主窗口是独立 webview，拥有独立的 Pinia 实例）
+    try {
+      await emitTo('main', 'settings-saved', {})
+    } catch (e) {
+      console.warn('[settings] Failed to notify main window:', e)
+    }
+
     savedMessage.value = '已保存'
     setTimeout(() => {
       savedMessage.value = ''

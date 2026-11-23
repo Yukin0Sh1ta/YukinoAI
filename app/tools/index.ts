@@ -27,6 +27,25 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ToolCallResul
   try {
     const args = JSON.parse(toolCall.function.arguments || '{}')
     const result = await executor(args)
+
+    // 执行器以 JSON 字符串报告失败，这里将其还原为结构化的失败结果，
+    // 否则调用方只会看到 success: true 而丢掉错误原因。
+    try {
+      const parsed = JSON.parse(result) as { success?: boolean; error?: unknown }
+      if (parsed && parsed.success === false) {
+        return {
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          args,
+          result: '',
+          success: false,
+          error: String(parsed.error ?? 'tool failed'),
+        }
+      }
+    } catch {
+      // 非 JSON 结果，按成功处理
+    }
+
     return {
       toolCallId: toolCall.id,
       toolName: toolCall.function.name,

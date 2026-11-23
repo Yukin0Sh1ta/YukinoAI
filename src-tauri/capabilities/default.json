@@ -24,23 +24,6 @@
     "sql:allow-execute",
     "sql:allow-select",
     {
-      "identifier": "shell:allow-open",
-      "allow": [
-        { "url": "https://**" },
-        { "url": "http://**" }
-      ]
-    },
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "cmd",
-          "cmd": "cmd",
-          "args": true
-        }
-      ]
-    },
-    {
       "identifier": "http:default",
       "allow": [
         { "url": "https://**" },

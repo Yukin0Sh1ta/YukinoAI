@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { listen } from '@tauri-apps/api/event'
 import { useSettingsStore } from '~/stores/settings'
 import { useCharacterStore } from '~/stores/character'
 import { useLive2DStore } from '~/stores/live2d'
@@ -27,6 +28,9 @@ const bottomInputRef = ref<InstanceType<typeof BottomInput> | null>(null)
 
 let unlistenOpenSettings: (() => void) | null = null
 let unlistenFocus: (() => void) | null = null
+let unlistenSettingsSaved: (() => void) | null = null
+let unlistenMoved: (() => void) | null = null
+let moveSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 处理发送消息：通过 chat 发送内容并隐藏菜单与输入框 */
 function handleSend(content: string) {
@@ -97,6 +101,28 @@ onMounted(async () => {
     console.warn('[index] Failed to register open-settings listener:', e)
   }
 
+  try {
+    unlistenSettingsSaved = await listen('settings-saved', async () => {
+      await settingsStore.loadSettings()
+      characterStore.loadCharacter(settingsStore.characterId)
+    })
+  } catch (e) {
+    console.warn('[index] Failed to register settings-saved listener:', e)
+  }
+
+  // 窗口移动时防抖保存位置：Tauri 关窗/退出不会触发 Vue 卸载
+  try {
+    unlistenMoved = await getCurrentWindow().onMoved(() => {
+      if (moveSaveTimer) clearTimeout(moveSaveTimer)
+      moveSaveTimer = setTimeout(() => {
+        moveSaveTimer = null
+        void saveWindowPosition()
+      }, 500)
+    })
+  } catch (e) {
+    console.warn('[index] Failed to register window move listener:', e)
+  }
+
   if (!settingsStore.isConfigured) {
     openSettings()
   }
@@ -111,6 +137,18 @@ onUnmounted(() => {
   if (unlistenFocus) {
     unlistenFocus()
     unlistenFocus = null
+  }
+  if (unlistenSettingsSaved) {
+    unlistenSettingsSaved()
+    unlistenSettingsSaved = null
+  }
+  if (unlistenMoved) {
+    unlistenMoved()
+    unlistenMoved = null
+  }
+  if (moveSaveTimer) {
+    clearTimeout(moveSaveTimer)
+    moveSaveTimer = null
   }
   saveWindowPosition()
 })

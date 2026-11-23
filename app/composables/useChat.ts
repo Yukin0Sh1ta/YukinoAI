@@ -19,6 +19,9 @@ import {
 } from '~/services/db'
 import type { Message, ToolCall } from '~/types'
 
+/** 单次用户消息允许的工具调用轮数上限，防止模型陷入无限循环。 */
+const MAX_TOOL_ROUNDS = 8
+
 /**
  * 生成 UUID。当 crypto.randomUUID 不可用时，回退为"时间戳 + 随机数"形式的 id。
  */
@@ -123,6 +126,7 @@ export function useChat() {
 
     try {
       let pendingToolCalls: ToolCall[] = []
+      let toolRounds = 0
 
       do {
         // 重置本轮的累加器
@@ -165,6 +169,21 @@ export function useChat() {
           break
         }
 
+        // 达到工具调用轮数上限 → 停止循环并告知用户
+        if (toolRounds >= MAX_TOOL_ROUNDS) {
+          const limitMsg: Message = {
+            id: generateId(),
+            conversationId: convId,
+            role: 'system',
+            content: `工具调用次数已达上限（${MAX_TOOL_ROUNDS} 轮），已停止继续调用工具。请基于现有信息直接回答用户。`,
+            createdAt: Date.now(),
+          }
+          conversationStore.addMessage(limitMsg)
+          await persistMessage(limitMsg)
+          break
+        }
+        toolRounds++
+
         // 逐个执行工具调用并持久化结果
         for (const toolCall of pendingToolCalls) {
           const result = await executeToolCall(toolCall)
@@ -172,7 +191,10 @@ export function useChat() {
             id: generateId(),
             conversationId: convId,
             role: 'tool',
-            content: result.result,
+            // 失败时把错误信息回传给模型，避免其看不到失败原因而无限重试
+            content: result.success
+              ? result.result
+              : JSON.stringify({ error: result.error ?? 'tool failed' }),
             toolCallId: result.toolCallId,
             toolName: result.toolName,
             createdAt: Date.now(),

@@ -1,5 +1,5 @@
 import type { Tool } from '~/types'
-import { Command } from '@tauri-apps/plugin-shell'
+import { invoke } from '@tauri-apps/api/core'
 
 // 工具定义（发送给 LLM 使用）
 export const TOOL_DEFINITIONS: Tool[] = [
@@ -68,7 +68,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'get_system_info',
     description:
-      'Get basic system information including OS, hostname, and available memory.',
+      'Get basic system information including OS, architecture, and hostname.',
     parameters: {
       type: 'object',
       properties: {},
@@ -77,26 +77,12 @@ export const TOOL_DEFINITIONS: Tool[] = [
   },
 ]
 
-/**
- * 通过 cmd /c 执行 Windows 命令，返回标准输出、标准错误和退出码。
- * @param args 传递给 cmd /c 的参数数组
- * @returns 包含 stdout、stderr 和 code 的结果对象
- */
-async function runCmd(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
-  const cmd = Command.create('cmd', ['/c', ...args])
-  const output = await cmd.execute()
-  return {
-    stdout: (output.stdout ?? '').trim(),
-    stderr: (output.stderr ?? '').trim(),
-    code: output.code ?? -1,
-  }
-}
-
 // 工具执行器映射表：根据工具名调用对应实现
 export const TOOL_EXECUTORS: Record<string, (args: Record<string, unknown>) => Promise<string>> = {
   /**
    * 打开系统应用程序。
-   * @param args 包含 app 字段（应用名称或命令）
+   * 交由 Rust 侧的白名单命令执行，不经过 shell。
+   * @param args 包含 app 字段（应用名称）
    * @returns JSON 字符串，包含执行结果
    */
   async open_application(args) {
@@ -104,14 +90,10 @@ export const TOOL_EXECUTORS: Record<string, (args: Record<string, unknown>) => P
     const app = String(args.app ?? '').trim().replace(/^["']|["']$/g, '')
     if (!app) return JSON.stringify({ success: false, error: 'Missing required parameter: app' })
     try {
-      // 判断是否是 URL，用 start 直接打开（不加空标题引号，避免引号残留）
-      const result = await runCmd(['start', app])
-      if (result.code !== 0 && result.stderr) {
-        return JSON.stringify({ success: false, error: result.stderr })
-      }
+      await invoke('open_application', { app })
       return JSON.stringify({ success: true, app })
     } catch (e) {
-      return JSON.stringify({ success: false, error: String(e) })
+      return JSON.stringify({ success: false, app, error: String(e) })
     }
   },
 
@@ -124,11 +106,7 @@ export const TOOL_EXECUTORS: Record<string, (args: Record<string, unknown>) => P
     const path = String(args.path ?? '').trim()
     if (!path) return JSON.stringify({ success: false, error: 'Missing required parameter: path' })
     try {
-      const result = await runCmd(['dir', '/b', path])
-      if (result.code !== 0) {
-        return JSON.stringify({ success: false, path, error: result.stderr || `Cannot list directory: ${path}` })
-      }
-      const entries = result.stdout.split(/\r?\n/).filter(Boolean)
+      const entries = await invoke<string[]>('list_directory', { path })
       return JSON.stringify({ success: true, path, entries })
     } catch (e) {
       return JSON.stringify({ success: false, path, error: String(e) })
@@ -146,12 +124,7 @@ export const TOOL_EXECUTORS: Record<string, (args: Record<string, unknown>) => P
     if (!directory) return JSON.stringify({ success: false, error: 'Missing required parameter: directory' })
     if (!pattern) return JSON.stringify({ success: false, error: 'Missing required parameter: pattern' })
     try {
-      const searchPath = `${directory}\\${pattern}`
-      const result = await runCmd(['dir', '/s', '/b', searchPath])
-      if (result.code !== 0 && !result.stdout) {
-        return JSON.stringify({ success: false, directory, pattern, error: result.stderr || 'No files found' })
-      }
-      const matches = result.stdout.split(/\r?\n/).filter(Boolean).slice(0, 50)
+      const matches = await invoke<string[]>('search_files', { directory, pattern })
       return JSON.stringify({ success: true, directory, pattern, count: matches.length, matches })
     } catch (e) {
       return JSON.stringify({ success: false, directory, pattern, error: String(e) })
@@ -168,10 +141,7 @@ export const TOOL_EXECUTORS: Record<string, (args: Record<string, unknown>) => P
     const path = String(args.path ?? '').trim().replace(/^["']|["']$/g, '')
     if (!path) return JSON.stringify({ success: false, error: 'Missing required parameter: path' })
     try {
-      const result = await runCmd(['start', path])
-      if (result.code !== 0 && result.stderr) {
-        return JSON.stringify({ success: false, path, error: result.stderr })
-      }
+      await invoke('open_path', { path })
       return JSON.stringify({ success: true, path })
     } catch (e) {
       return JSON.stringify({ success: false, path, error: String(e) })
@@ -179,49 +149,15 @@ export const TOOL_EXECUTORS: Record<string, (args: Record<string, unknown>) => P
   },
 
   /**
-   * 获取系统基本信息，包括操作系统名称、主机名和内存信息。
-   * 优先尝试完整 systeminfo 命令，失败时回退到轻量命令。
+   * 获取系统基本信息，包括操作系统名称、CPU 架构和主机名。
+   * 由 Rust 侧直接读取环境变量，不调用外部命令。
    * @param _args 未使用的参数
    * @returns JSON 字符串，包含系统信息
    */
   async get_system_info(_args) {
     try {
-      // 优先尝试完整的 systeminfo 命令；失败时回退到轻量命令
-      let osName = 'unknown'
-      let hostname = 'unknown'
-      let totalMemory = 'unknown'
-      let availableMemory = 'unknown'
-
-      const sysResult = await runCmd(['systeminfo'])
-      if (sysResult.code === 0 && sysResult.stdout) {
-        const lines = sysResult.stdout.split(/\r?\n/)
-        for (const line of lines) {
-          const lower = line.toLowerCase()
-          const idx = line.indexOf(':')
-          if (idx === -1) continue
-          const key = lower.slice(0, idx).trim()
-          const val = line.slice(idx + 1).trim()
-          if (key.includes('os name')) osName = val
-          else if (key.includes('host name')) hostname = val
-          else if (key.includes('total physical memory')) totalMemory = val
-          else if (key.includes('available physical memory')) availableMemory = val
-        }
-      } else {
-        // 回退方案
-        const verResult = await runCmd(['ver'])
-        if (verResult.code === 0 && verResult.stdout) osName = verResult.stdout
-
-        const hostResult = await runCmd(['hostname'])
-        if (hostResult.code === 0 && hostResult.stdout) hostname = hostResult.stdout
-      }
-
-      return JSON.stringify({
-        success: true,
-        os: osName,
-        hostname,
-        totalMemory,
-        availableMemory,
-      })
+      const info = await invoke<{ os: string; arch: string; hostname: string }>('system_info')
+      return JSON.stringify({ success: true, ...info })
     } catch (e) {
       return JSON.stringify({ success: false, error: String(e) })
     }
